@@ -64,11 +64,14 @@ app.get('/api/messages/:roomId', async (req: Request, res: Response) => {
 });
 
 // Token
+// В server.ts замени роут /api/token на этот:
 app.get('/api/token', async (req: Request, res: Response) => {
   const { room, username } = req.query;
   try {
+    // Генерируем абсолютно уникальный ID для каждого подключения
+    const connectionId = Math.random().toString(36).substring(7);
     const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
-      identity: `${username}_${Date.now()}`, // Фикс для стабильности
+      identity: `${username}_${connectionId}`, // Формат: "user_случайныйID"
     });
     at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
     res.send({ token: await at.toJwt() });
