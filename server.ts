@@ -16,6 +16,7 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+// Auth
 app.post('/api/register', async (req: Request, res: Response) => {
   const { email, username, password } = req.body;
   try {
@@ -34,6 +35,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
   } catch (e) { res.status(500).json({ error: "error" }); }
 });
 
+// Friends
 app.post('/api/friends/add', async (req: Request, res: Response) => {
     const { myId, targetUsername } = req.body;
     try {
@@ -54,21 +56,26 @@ app.get('/api/friends/:userId', async (req: Request, res: Response) => {
     res.json(f);
 });
 
+// Messages
 app.get('/api/messages/:roomId', async (req: Request, res: Response) => {
     const roomId = req.params.roomId as string;
     const msgs = await prisma.message.findMany({ where: { roomId }, orderBy: { createdAt: 'asc' } });
     res.json(msgs);
 });
 
+// Token
 app.get('/api/token', async (req: Request, res: Response) => {
   const { room, username } = req.query;
-  const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
-    identity: `${username}_${Date.now()}`, // Уникальный ID для каждой сессии
-  });
-  at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
-  res.send({ token: await at.toJwt() });
+  try {
+    const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
+      identity: `${username}_${Date.now()}`, // Фикс для стабильности
+    });
+    at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
+    res.send({ token: await at.toJwt() });
+  } catch (e) { res.status(500).send("error"); }
 });
 
+// Sockets
 io.on('connection', (socket: Socket) => {
     socket.on('join_room', (id: string) => socket.join(id));
     socket.on('send_msg', async (data: any) => {
@@ -83,4 +90,4 @@ io.on('connection', (socket: Socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`✅ Server live on ${PORT}`));
+httpServer.listen(PORT, () => console.log(`✅ Talk Server Live on ${PORT}`));
