@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "mongodb"
-  url      = env("DATABASE_URL")
+  url      = "mongodb+srv://Graphi:qqq1234qqq1234@cluster0.4xxpdrs.mongodb.net/talk?retryWrites=true&w=majority"
 }
 
 model User {
@@ -22,15 +22,17 @@ model FriendRequest {
   senderId   String @db.ObjectId
   receiverId String @db.ObjectId
   status     String @default("PENDING")
-  sender     User   @relation("SentRequests", fields: [senderId], references: [id])
-  receiver   User   @relation("ReceivedRequests", fields: [receiverId], references: [id])
+
+  sender   User @relation("SentRequests", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedRequests", fields: [receiverId], references: [id])
+
   @@unique([senderId, receiverId])
 }
 
 model Message {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   content   String
-  roomId    String
+  roomId    String   // ID комнаты (в нашем случае ID FriendRequest)
   userId    String   @db.ObjectId
   username  String
   createdAt DateTime @default(now())

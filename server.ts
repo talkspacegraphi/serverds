@@ -1,7 +1,7 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { AccessToken } from 'livekit-server-sdk';
 import bcrypt from 'bcryptjs';
@@ -19,8 +19,8 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
-// Регистрация
-app.post('/api/register', async (req, res) => {
+// --- АВТОРИЗАЦИЯ ---
+app.post('/api/register', async (req: Request, res: Response) => {
   const { email, username, password } = req.body;
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -29,20 +29,17 @@ app.post('/api/register', async (req, res) => {
   } catch (e) { res.status(400).json({ error: "User exists" }); }
 });
 
-// Логин
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !await bcrypt.compare(password, user.password)) {
-        return res.status(400).json({ error: "Fail" });
-    }
+    if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: "Fail" });
     res.json(user);
   } catch (e) { res.status(500).json({ error: "Error" }); }
 });
 
-// Друзья
-app.post('/api/friends/add', async (req, res) => {
+// --- ДРУЗЬЯ (ИСПРАВЛЕНО as string) ---
+app.post('/api/friends/add', async (req: Request, res: Response) => {
     const { myId, targetUsername } = req.body;
     try {
         const target = await prisma.user.findUnique({ where: { username: targetUsername } });
@@ -50,50 +47,57 @@ app.post('/api/friends/add', async (req, res) => {
         const request = await prisma.friendRequest.create({ data: { senderId: myId, receiverId: target.id } });
         io.to(target.id).emit('update_friends');
         res.json(request);
-    } catch (e) { res.status(400).json({ error: "Already sent" }); }
+    } catch (e) { res.status(400).json({ error: "Error" }); }
 });
 
-app.get('/api/friends/:userId', async (req, res) => {
-    const f = await prisma.friendRequest.findMany({
-        where: { OR: [{ receiverId: req.params.userId }, { senderId: req.params.userId }] },
-        include: { sender: true, receiver: true }
-    });
-    res.json(f);
+app.get('/api/friends/:userId', async (req: Request, res: Response) => {
+    const userId = req.params.userId as string; // ФИКС ТИПА
+    try {
+        const f = await prisma.friendRequest.findMany({
+            where: { OR: [{ receiverId: userId }, { senderId: userId }] },
+            include: { sender: true, receiver: true }
+        });
+        res.json(f);
+    } catch (e) { res.status(500).json([]); }
 });
 
-// Сообщения
-app.get('/api/messages/:roomId', async (req, res) => {
-    const msgs = await prisma.message.findMany({ where: { roomId: req.params.roomId }, orderBy: { createdAt: 'asc' } });
-    res.json(msgs);
+// --- СООБЩЕНИЯ (ИСПРАВЛЕНО as string) ---
+app.get('/api/messages/:roomId', async (req: Request, res: Response) => {
+    const roomId = req.params.roomId as string; // ФИКС ТИПА
+    try {
+        const msgs = await prisma.message.findMany({ 
+            where: { roomId: roomId }, 
+            orderBy: { createdAt: 'asc' } 
+        });
+        res.json(msgs);
+    } catch (e) { res.json([]); }
 });
 
-// LiveKit Токен (для звонков)
-app.get('/api/token', async (req, res) => {
+// --- LIVEKIT ТОКЕН ---
+app.get('/api/token', async (req: Request, res: Response) => {
   const { room, username } = req.query;
   try {
-    const at = new AccessToken(
-        process.env.LIVEKIT_API_KEY || "API6NzD2nknoFKy", 
-        process.env.LIVEKIT_API_SECRET || "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", 
-        { identity: `${username}_${Date.now()}` }
-    );
+    const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
+      identity: `${username}_${Date.now()}`,
+    });
     at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
     res.send({ token: await at.toJwt() });
   } catch (e) { res.status(500).send("LK Error"); }
 });
 
-// Сокеты
-io.on('connection', (socket) => {
-    socket.on('join_room', (id) => socket.join(id));
-    socket.on('send_msg', async (data) => {
-        const newMessage = await prisma.message.create({ 
-            data: { content: data.content, roomId: data.roomId, userId: data.userId, username: data.username } 
-        });
-        io.to(data.roomId).emit('new_msg', newMessage);
+// --- СОКЕТЫ ---
+io.on('connection', (socket: Socket) => {
+    socket.on('join_room', (id: string) => socket.join(id));
+    socket.on('send_msg', async (data: any) => {
+        try {
+            const newMessage = await prisma.message.create({ 
+                data: { content: data.content, roomId: data.roomId, userId: data.userId, username: data.username } 
+            });
+            io.to(data.roomId).emit('new_msg', newMessage);
+        } catch (e) {}
     });
-    socket.on('start_call', (data) => {
-        io.to(data.to).emit('incoming_call', data);
-    });
+    socket.on('start_call', (data: any) => { io.to(data.to).emit('incoming_call', data); });
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`✅ Server live on port ${PORT}`));
+httpServer.listen(PORT, () => console.log(`✅ Server live on ${PORT}`));
