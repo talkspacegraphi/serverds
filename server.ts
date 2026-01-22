@@ -8,9 +8,12 @@ import bcrypt from 'bcryptjs';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
+
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: "*" } });
+const io = new Server(httpServer, { 
+    cors: { origin: "*" } 
+});
 const prisma = new PrismaClient();
 
 app.use(cors());
@@ -24,7 +27,7 @@ app.get('/api/token', async (req: Request, res: Response) => {
   if (!room || !userId) return res.status(400).send("Missing params");
 
   const channelName = room as string;
-  // Превращаем ID пользователя в число для Agora
+  // Генерируем стабильный числовой UID на основе userId из базы
   const uid = Math.abs(userId.toString().split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0)) % 1000000;
   const privilegeExpiredTs = Math.floor(Date.now() / 1000) + 3600;
 
@@ -36,23 +39,22 @@ app.get('/api/token', async (req: Request, res: Response) => {
   } catch (e) { res.status(500).send("Token Error"); }
 });
 
-app.post('/api/register', async (req: Request, res: Response) => {
-  const { email, username, password } = req.body;
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({ data: { email, username, password: hashedPassword } });
+// Роуты авторизации и друзей (без изменений)
+app.post('/api/register', async (req, res) => {
+    const { email, username, password } = req.body;
+    try {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await prisma.user.create({ data: { email, username, password: hashedPassword } });
+      res.json(user);
+    } catch (e) { res.status(400).json({ error: "exists" }); }
+});
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: "fail" });
     res.json(user);
-  } catch (e) { res.status(400).json({ error: "exists" }); }
 });
-
-app.post('/api/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: "fail" });
-  res.json(user);
-});
-
-app.post('/api/friends/add', async (req: Request, res: Response) => {
+app.post('/api/friends/add', async (req, res) => {
     const { myId, targetUsername } = req.body;
     try {
         const target = await prisma.user.findUnique({ where: { username: targetUsername } });
@@ -62,8 +64,7 @@ app.post('/api/friends/add', async (req: Request, res: Response) => {
         res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: "error" }); }
 });
-
-app.get('/api/friends/:userId', async (req: Request, res: Response) => {
+app.get('/api/friends/:userId', async (req, res) => {
     const userId = req.params.userId as string;
     const f = await prisma.friendRequest.findMany({
         where: { OR: [{ receiverId: userId }, { senderId: userId }] },
