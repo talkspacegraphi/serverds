@@ -62,17 +62,29 @@ app.get('/api/friends/:userId', async (req: Request, res: Response) => {
 });
 
 // --- LIVEKIT ТОКЕН (БЕЗ ВПН) ---
+// В server.ts найди роут /api/token и замени его на этот:
 app.get('/api/token', async (req: Request, res: Response) => {
   const { room, username } = req.query;
+  if (!room || !username) return res.status(400).send("Missing params");
+
   try {
-    const at = new AccessToken(
-        process.env.LIVEKIT_API_KEY || "API6NzD2nknoFKy", 
-        process.env.LIVEKIT_API_SECRET || "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", 
-        { identity: `${username}_${Date.now()}` }
-    );
-    at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
+    // Генерируем абсолютно уникальный ID сессии для каждого входа
+    const sessionToken = Math.random().toString(36).substring(7);
+    const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
+      identity: `${username}_${sessionToken}`, 
+    });
+    
+    at.addGrant({ 
+        roomJoin: true, 
+        room: room as string, 
+        canPublish: true, 
+        canSubscribe: true 
+    });
+    
     res.send({ token: await at.toJwt() });
-  } catch (e) { res.status(500).send("Error"); }
+  } catch (e) {
+    res.status(500).send("LiveKit Error");
+  }
 });
 
 io.on('connection', (socket: Socket) => {
