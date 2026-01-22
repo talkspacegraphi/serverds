@@ -24,12 +24,15 @@ const APP_ID = "1139edf16962412ea299c3da91c89dd1";
 const APP_CERTIFICATE = "c2647f769cae463c9bcb14a6b7bf3def";
 
 // Генерация токена для звонка (БЕЗ ВПН)
+// В server.ts замени роут /api/token на этот:
 app.get('/api/token', async (req: Request, res: Response) => {
-  const { room } = req.query;
-  if (!room) return res.status(400).send("Room name is required");
+  const { room, userId } = req.query; // Берем userId из запроса
+  if (!room || !userId) return res.status(400).send("Missing params");
 
   const channelName = room as string;
-  const uid = Math.floor(Math.random() * 10000); // Короткий безопасный ID
+  // Agora требует числовой UID, мы превратим строковый ID из Монго в число
+  const uid = Math.abs(userId.toString().split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0)) % 1000000;
+  
   const privilegeExpiredTs = Math.floor(Date.now() / 1000) + 3600;
 
   try {
@@ -37,9 +40,7 @@ app.get('/api/token', async (req: Request, res: Response) => {
       APP_ID, APP_CERTIFICATE, channelName, uid, RtcRole.PUBLISHER, privilegeExpiredTs, privilegeExpiredTs
     );
     res.json({ token, uid, appId: APP_ID });
-  } catch (e) {
-    res.status(500).send("Agora Token Error");
-  }
+  } catch (e) { res.status(500).send("Error"); }
 });
 
 // --- АВТОРИЗАЦИЯ ---
