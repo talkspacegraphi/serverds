@@ -3,7 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { AccessToken } from 'livekit-server-sdk';
+import { RtcTokenBuilder, RtcRole } from 'agora-token';
 import bcrypt from 'bcryptjs';
 import * as dotenv from 'dotenv';
 
@@ -16,8 +16,37 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
-// Auth
-app.post('/api/register', async (req: Request, res: Response) => {
+const APP_ID = "1139edf16962412ea299c3da91c89dd1";
+const APP_CERTIFICATE = "c2647f769cae463c9bcb14a6b7bf3def";
+
+app.get('/api/token', async (req: Request, res: Response) => {
+  const { room } = req.query;
+  if (!room) return res.status(400).send("Room required");
+
+  const channelName = room as string;
+  const uid = Math.floor(Math.random() * 1000000);
+  const role = RtcRole.PUBLISHER;
+  
+  // Время истечения (1 час)
+  const expirationTimestamp = Math.floor(Date.now() / 1000) + 3600;
+
+  try {
+    // ИСПРАВЛЕНО: Теперь передаем 7 аргументов
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      APP_ID, 
+      APP_CERTIFICATE, 
+      channelName, 
+      uid, 
+      role, 
+      expirationTimestamp, // tokenExpire
+      expirationTimestamp  // privilegeExpire (7-й аргумент)
+    );
+    res.json({ token, uid, appId: APP_ID });
+  } catch (e) { res.status(500).send("Error"); }
+});
+
+// --- ОСТАЛЬНОЙ КОД (Auth, Friends, Sockets) ---
+app.post('/api/register', async (req, res) => {
   const { email, username, password } = req.body;
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -26,24 +55,21 @@ app.post('/api/register', async (req: Request, res: Response) => {
   } catch (e) { res.status(400).json({ error: "exists" }); }
 });
 
-app.post('/api/login', async (req: Request, res: Response) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
-  try {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: "fail" });
-    res.json(user);
-  } catch (e) { res.status(500).json({ error: "error" }); }
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: "fail" });
+  res.json(user);
 });
 
-// Friends
 app.post('/api/friends/add', async (req: Request, res: Response) => {
     const { myId, targetUsername } = req.body;
     try {
         const target = await prisma.user.findUnique({ where: { username: targetUsername } });
         if (!target) return res.status(404).json({ error: "notfound" });
-        const request = await prisma.friendRequest.create({ data: { senderId: myId, receiverId: target.id } });
+        await prisma.friendRequest.create({ data: { senderId: myId, receiverId: target.id } });
         io.to(target.id).emit('update_friends');
-        res.json(request);
+        res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: "error" }); }
 });
 
@@ -56,29 +82,12 @@ app.get('/api/friends/:userId', async (req: Request, res: Response) => {
     res.json(f);
 });
 
-// Messages
 app.get('/api/messages/:roomId', async (req: Request, res: Response) => {
     const roomId = req.params.roomId as string;
     const msgs = await prisma.message.findMany({ where: { roomId }, orderBy: { createdAt: 'asc' } });
     res.json(msgs);
 });
 
-// Token
-// В server.ts замени роут /api/token на этот:
-app.get('/api/token', async (req: Request, res: Response) => {
-  const { room, username } = req.query;
-  try {
-    // Генерируем абсолютно уникальный ID для каждого подключения
-    const connectionId = Math.random().toString(36).substring(7);
-    const at = new AccessToken("API6NzD2nknoFKy", "b0HExmpk48kfHhpw598dacKTfXiZRf2hiB3NVl6FJOlB", {
-      identity: `${username}_${connectionId}`, // Формат: "user_случайныйID"
-    });
-    at.addGrant({ roomJoin: true, room: room as string, canPublish: true, canSubscribe: true });
-    res.send({ token: await at.toJwt() });
-  } catch (e) { res.status(500).send("error"); }
-});
-
-// Sockets
 io.on('connection', (socket: Socket) => {
     socket.on('join_room', (id: string) => socket.join(id));
     socket.on('send_msg', async (data: any) => {
@@ -93,4 +102,4 @@ io.on('connection', (socket: Socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`✅ Talk Server Live on ${PORT}`));
+httpServer.listen(PORT, () => console.log(`✅ Agora Server Started on ${PORT}`));
