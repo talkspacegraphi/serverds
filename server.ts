@@ -24,28 +24,19 @@ app.get('/api/token', async (req: Request, res: Response) => {
   if (!room) return res.status(400).send("Room required");
 
   const channelName = room as string;
-  const uid = Math.floor(Math.random() * 1000000);
-  const role = RtcRole.PUBLISHER;
-  
-  // Время истечения (1 час)
-  const expirationTimestamp = Math.floor(Date.now() / 1000) + 3600;
+  // ИСПОЛЬЗУЕМ БЕЗОПАСНЫЙ UID ДЛЯ AGORA
+  const uid = Math.floor(Math.random() * 10000); 
+  const privilegeExpiredTs = Math.floor(Date.now() / 1000) + 3600;
 
   try {
-    // ИСПРАВЛЕНО: Теперь передаем 7 аргументов
     const token = RtcTokenBuilder.buildTokenWithUid(
-      APP_ID, 
-      APP_CERTIFICATE, 
-      channelName, 
-      uid, 
-      role, 
-      expirationTimestamp, // tokenExpire
-      expirationTimestamp  // privilegeExpire (7-й аргумент)
+      APP_ID, APP_CERTIFICATE, channelName, uid, RtcRole.PUBLISHER, privilegeExpiredTs, privilegeExpiredTs
     );
     res.json({ token, uid, appId: APP_ID });
   } catch (e) { res.status(500).send("Error"); }
 });
 
-// --- ОСТАЛЬНОЙ КОД (Auth, Friends, Sockets) ---
+// --- Auth & Friends (Без изменений) ---
 app.post('/api/register', async (req, res) => {
   const { email, username, password } = req.body;
   try {
@@ -62,7 +53,7 @@ app.post('/api/login', async (req, res) => {
   res.json(user);
 });
 
-app.post('/api/friends/add', async (req: Request, res: Response) => {
+app.post('/api/friends/add', async (req, res) => {
     const { myId, targetUsername } = req.body;
     try {
         const target = await prisma.user.findUnique({ where: { username: targetUsername } });
@@ -73,7 +64,7 @@ app.post('/api/friends/add', async (req: Request, res: Response) => {
     } catch (e) { res.status(400).json({ error: "error" }); }
 });
 
-app.get('/api/friends/:userId', async (req: Request, res: Response) => {
+app.get('/api/friends/:userId', async (req, res) => {
     const userId = req.params.userId as string;
     const f = await prisma.friendRequest.findMany({
         where: { OR: [{ receiverId: userId }, { senderId: userId }] },
@@ -82,7 +73,7 @@ app.get('/api/friends/:userId', async (req: Request, res: Response) => {
     res.json(f);
 });
 
-app.get('/api/messages/:roomId', async (req: Request, res: Response) => {
+app.get('/api/messages/:roomId', async (req, res) => {
     const roomId = req.params.roomId as string;
     const msgs = await prisma.message.findMany({ where: { roomId }, orderBy: { createdAt: 'asc' } });
     res.json(msgs);
@@ -92,14 +83,11 @@ io.on('connection', (socket: Socket) => {
     socket.on('join_room', (id: string) => socket.join(id));
     socket.on('send_msg', async (data: any) => {
         try {
-            const newMessage = await prisma.message.create({ 
-                data: { content: data.content, roomId: data.roomId, userId: data.userId, username: data.username } 
-            });
-            io.to(data.roomId).emit('new_msg', newMessage);
+            await prisma.message.create({ data: { content: data.content, roomId: data.roomId, userId: data.userId, username: data.username } });
+            io.to(data.roomId).emit('new_msg', data);
         } catch (e) {}
     });
     socket.on('start_call', (data: any) => { io.to(data.to).emit('incoming_call', data); });
 });
 
-const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`✅ Agora Server Started on ${PORT}`));
+httpServer.listen(3001, () => console.log("✅ Server: 3001"));
